@@ -538,6 +538,9 @@ textarea{min-height:72px;resize:vertical}
         <button class="tab" id="tab-agenda" onclick="switchView('agenda')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Agenda
         </button>
+        <button class="tab" id="tab-st" onclick="switchView('st')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>Solicitudes
+        </button>
       </div>
     </div>
     <div class="header-right">
@@ -2061,16 +2064,18 @@ function switchView(v) {
   document.getElementById('view-board').style.display=v==='board'?'grid':'none';
   document.getElementById('view-dashboard').style.display=v==='dashboard'?'block':'none';
   document.getElementById('view-agenda').style.display=v==='agenda'?'flex':'none';
+  document.getElementById('view-st').style.display=v==='st'?'flex':'none';
   document.getElementById('filterbar').style.display=v==='board'?'flex':'none';
   document.getElementById('tab-board').classList.toggle('active',v==='board');
   document.getElementById('tab-dash').classList.toggle('active',v==='dashboard');
   document.getElementById('tab-agenda').classList.toggle('active',v==='agenda');
-  // Nueva tarea solo visible en el tablero
+  document.getElementById('tab-st').classList.toggle('active',v==='st');
   const btnNueva = document.getElementById('btnNuevaTarea');
   if(btnNueva) btnNueva.style.display = v==='board' ? 'flex' : 'none';
 
   if(v==='dashboard') renderDashboard();
   if(v==='agenda') renderAgenda();
+  if(v==='st') { populateSTFilters(); renderST(); }
 }
 
 /* ══ CHECKLIST ══ */
@@ -3140,6 +3145,385 @@ function toggleRecurActive(id) {
   if (currentView === 'agenda') renderAgenda();
 }
 
+/* ══════════════════════════════════════════
+   SOLICITUDES TÉCNICAS — split panel v2
+══════════════════════════════════════════ */
+let stRequests = JSON.parse(localStorage.getItem('st_requests_v1') || 'null');
+if (!stRequests) {
+  stRequests = [
+    { id:1, codigo:'ST-001', solicitante:'Jair Angome',    responsable:'Kevin Huacahuasi', tipo:'Error ETL',       prioridad:'Alta',  desc:'El proceso ETL de carga nocturna falló en la tabla fact_ventas. Los datos del día 26/04 no están disponibles en el DW. Se requiere revisión urgente del pipeline de Airflow.', estado:'En proceso', deadline:'2026-04-28T18:00', comments:'Se identificó el error en el job de transformación. Revisando logs de Airflow.', createdAt:'2026-04-27T08:30', updatedAt:'2026-04-27T10:15' },
+    { id:2, codigo:'ST-002', solicitante:'Carlos Alvarado', responsable:'Kevin Huacahuasi', tipo:'Consulta SQL',    prioridad:'Media', desc:'Necesito una consulta optimizada para extraer los KPIs de ventas por región del último trimestre. La consulta actual tarda más de 3 minutos en ejecutarse.', estado:'Pendiente', deadline:'2026-04-29T12:00', comments:'', createdAt:'2026-04-27T09:00', updatedAt:'2026-04-27T09:00' },
+    { id:3, codigo:'ST-003', solicitante:'Omar Paucar',     responsable:'Kevin Huacahuasi', tipo:'Dashboard BI',   prioridad:'Media', desc:'El dashboard de rentabilidad en Power BI no refleja los datos actualizados. El último refresh fue hace 2 días. Se requiere revisar la conexión con el DW y programar refresh automático.', estado:'Resuelto', deadline:'2026-04-27T17:00', comments:'Se actualizó el gateway y se programó refresh cada 4 horas. Validado con el cliente.', createdAt:'2026-04-26T14:00', updatedAt:'2026-04-27T11:30' },
+    { id:4, codigo:'ST-004', solicitante:'Estena',           responsable:'Kevin Huacahuasi', tipo:'Automatización', prioridad:'Baja',  desc:'Automatizar el envío de reporte semanal de indicadores a la gerencia. El reporte debe generarse cada lunes a las 7am y enviarse por correo a los stakeholders.', estado:'Pendiente', deadline:'2026-05-05T09:00', comments:'', createdAt:'2026-04-27T11:00', updatedAt:'2026-04-27T11:00' },
+    { id:5, codigo:'ST-005', solicitante:'Jair Angome',     responsable:'Kevin Huacahuasi', tipo:'Incidente',      prioridad:'Alta',  desc:'Caída del servicio de API de integración con Salesforce. Los datos de CRM no están llegando al DW desde las 06:00. Impacto en reportes de ventas en tiempo real.', estado:'Cerrado', deadline:'2026-04-26T20:00', comments:'Se restableció la conexión. El problema fue un certificado SSL vencido. Se renovó y se configuró alerta de vencimiento con 30 días de anticipación.', createdAt:'2026-04-26T06:45', updatedAt:'2026-04-26T14:20' },
+    { id:6, codigo:'ST-006', solicitante:'Daniel',           responsable:'Kevin Huacahuasi', tipo:'Soporte General',prioridad:'Baja',  desc:'Configurar acceso de solo lectura a la base de datos de staging para el nuevo analista junior. Requiere permisos en esquemas: staging, raw_data y master.', estado:'Pendiente', deadline:'2026-04-30T12:00', comments:'', createdAt:'2026-04-27T13:00', updatedAt:'2026-04-27T13:00' },
+  ];
+  localStorage.setItem('st_requests_v1', JSON.stringify(stRequests));
+}
+
+let stSelectedId = null;
+let stEditMode   = false;
+
+const ST_PRIO = {
+  'Alta' :{ bg:'#FAEDED', text:'#922020', dot:'#E24B4A' },
+  'Media':{ bg:'#FBF3E2', text:'#7A4E10', dot:'#D4A600' },
+  'Baja' :{ bg:'#EAF3DE', text:'#3B6D11', dot:'#1D9E75' },
+};
+const ST_ESTADO = {
+  'Pendiente' :{ bg:'#FBF3E2', text:'#7A4E10' },
+  'En proceso':{ bg:'#E6F1FB', text:'#185FA5' },
+  'Resuelto'  :{ bg:'#EAF3DE', text:'#3B6D11' },
+  'Cerrado'   :{ bg:'var(--bg)', text:'var(--muted)' },
+};
+const ST_TIPO_ICON = {'Incidente':'⚡','Consulta SQL':'🗃','Error ETL':'🔄','Dashboard BI':'📊','Automatización':'🤖','Soporte General':'🛠'};
+
+function saveSTStorage() { localStorage.setItem('st_requests_v1', JSON.stringify(stRequests)); }
+
+function nextSTCode() {
+  if (!stRequests.length) return 'ST-001';
+  const nums = stRequests.map(r=>parseInt(r.codigo.replace('ST-',''))||0);
+  return 'ST-' + String(Math.max(...nums)+1).padStart(3,'0');
+}
+
+function populateSTFilters() {
+  const devSel = document.getElementById('st-filter-dev');
+  if (!devSel) return;
+  const devs = [...new Set(stRequests.map(r=>r.solicitante))].sort();
+  devSel.innerHTML = '<option value="all">👤 Todos los solicitantes</option>' +
+    devs.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+}
+
+function getSTFiltered() {
+  const fDev    = document.getElementById('st-filter-dev')?.value    || 'all';
+  const fPrio   = document.getElementById('st-filter-prio')?.value   || 'all';
+  const fTipo   = document.getElementById('st-filter-tipo')?.value   || 'all';
+  const fEstado = document.getElementById('st-filter-estado')?.value || 'all';
+  const q       = (document.getElementById('st-search')?.value || '').toLowerCase();
+  return stRequests.filter(r =>
+    (fDev==='all'    || r.solicitante===fDev) &&
+    (fPrio==='all'   || r.prioridad===fPrio) &&
+    (fTipo==='all'   || r.tipo===fTipo) &&
+    (fEstado==='all' || r.estado===fEstado) &&
+    (!q || r.codigo.toLowerCase().includes(q) || r.desc.toLowerCase().includes(q) ||
+           r.solicitante.toLowerCase().includes(q) || r.tipo.toLowerCase().includes(q))
+  );
+}
+
+function renderST() {
+  populateSTFilters();
+  renderSTAlert();
+  renderSTKpis();
+  renderSTList();
+  renderSTDetail(stSelectedId);
+}
+
+function renderSTKpis() {
+  const today = localDateString();
+  const total      = stRequests.length;
+  const pendientes = stRequests.filter(r=>r.estado==='Pendiente').length;
+  const resueltasH = stRequests.filter(r=>r.estado==='Resuelto'&&r.updatedAt?.startsWith(today)).length;
+  const criticas   = stRequests.filter(r=>r.prioridad==='Alta'&&r.estado!=='Resuelto'&&r.estado!=='Cerrado').length;
+  const kpis=[
+    {icon:'📋',label:'Total solicitudes',value:total,   bg:'#EEEDFE',color:'var(--purple-dark)'},
+    {icon:'⏳',label:'Pendientes',        value:pendientes,bg:'#FBF3E2',color:'#7A4E10'},
+    {icon:'✅',label:'Resueltas hoy',     value:resueltasH,bg:'#EAF3DE',color:'#3B6D11'},
+    {icon:'🚨',label:'Críticas abiertas', value:criticas,  bg:'#FAEDED',color:'#922020'},
+  ];
+  document.getElementById('st-kpis').innerHTML = kpis.map(k=>`
+    <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:9px;padding:10px 12px;display:flex;align-items:center;gap:9px">
+      <div style="width:30px;height:30px;border-radius:7px;background:${k.bg};display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">${k.icon}</div>
+      <div>
+        <div style="font-size:9px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-family:'Outfit',sans-serif">${k.label}</div>
+        <div style="font-size:20px;font-weight:700;color:${k.color};letter-spacing:-1px;line-height:1.1;font-family:'Outfit',sans-serif">${k.value}</div>
+      </div>
+    </div>`).join('');
+}
+
+function renderSTAlert() {
+  const now = new Date();
+  const sin_atender = stRequests.filter(r => {
+    if (r.estado !== 'Pendiente') return false;
+    const created = new Date(r.createdAt);
+    return (now - created) > 24 * 3600000;
+  });
+  // Insert banner above list if needed
+  const listEl = document.getElementById('st-list');
+  const existingBanner = document.getElementById('st-alert-banner');
+  if (existingBanner) existingBanner.remove();
+  if (!sin_atender.length) return;
+  const banner = document.createElement('div');
+  banner.id = 'st-alert-banner';
+  banner.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;background:#FBF3E2;border-bottom:1px solid #E8D5A0">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4A600" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".5" fill="#D4A600"/></svg>
+    <span style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:600;color:#854F0B">
+      <strong>${sin_atender.length}</strong> ticket${sin_atender.length>1?'s':''} sin atender hace más de 24h:
+      ${sin_atender.map(r=>`<span style="font-weight:700;color:#7A4E10">${r.codigo}</span>`).join(', ')}
+    </span>
+  </div>`;
+  listEl.parentNode.insertBefore(banner, listEl);
+}
+
+function populateSTFilters() {
+  const devSel = document.getElementById('st-filter-dev');
+  if (!devSel) return;
+  // Count open tickets per dev (solicitante)
+  const counts = {};
+  stRequests.forEach(r => {
+    if (r.estado !== 'Resuelto' && r.estado !== 'Cerrado') {
+      counts[r.solicitante] = (counts[r.solicitante] || 0) + 1;
+    }
+  });
+  const devs = [...new Set(stRequests.map(r=>r.solicitante))].sort();
+  devSel.innerHTML = '<option value="all">👤 Todos los solicitantes</option>' +
+    devs.map(d=>{
+      const c = counts[d] || 0;
+      return `<option value="${esc(d)}">${esc(d)}${c>0?` (${c} abierto${c>1?'s':''})`:''}</option>`;
+    }).join('');
+}
+
+function renderSTList() {
+  const filtered = getSTFiltered();
+  const listEl = document.getElementById('st-list');
+  if (!filtered.length) {
+    listEl.innerHTML = `<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px">No hay solicitudes que coincidan con los filtros.</div>`;
+    return;
+  }
+  listEl.innerHTML = filtered.map(r => {
+    const pc = ST_PRIO[r.prioridad]||ST_PRIO['Media'];
+    const ec = ST_ESTADO[r.estado]||ST_ESTADO['Pendiente'];
+    const isSelected = r.id === stSelectedId;
+    const overdue = r.deadline && new Date(r.deadline)<new Date() && r.estado!=='Resuelto' && r.estado!=='Cerrado';
+    const initials = r.solicitante.split(' ').map(w=>w[0]).join('').slice(0,2);
+    return `<div onclick="selectST(${r.id})" style="display:grid;grid-template-columns:72px 1fr 100px 90px 36px;gap:0;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer;background:${isSelected?'var(--purple-light)':'var(--card-bg)'};transition:background .1s" onmouseover="if(${r.id}!==stSelectedId)this.style.background='var(--bg)'" onmouseout="this.style.background='${isSelected?'var(--purple-light)':'var(--card-bg)'}'">
+      <div style="padding:0 12px;display:flex;align-items:center">
+        <span style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:700;color:${isSelected?'var(--purple-dark)':'var(--purple)'}">${r.codigo}</span>
+      </div>
+      <div style="padding:0 8px;display:flex;flex-direction:column;justify-content:center;min-width:0">
+        <div style="font-size:12px;font-weight:500;color:var(--gray-900);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.desc)}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">${ST_TIPO_ICON[r.tipo]||'📋'} ${r.tipo}${r.taskId?' · <span style="color:var(--purple);font-weight:600">🔗 vinculado</span>':''}${overdue?' · <span style="color:#922020;font-weight:600">⚠ Vencida</span>':''}</div>
+      </div>
+      <div style="padding:0 8px;display:flex;align-items:center">
+        <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:${ec.bg};color:${ec.text};white-space:nowrap">${r.estado}</span>
+      </div>
+      <div style="padding:0 8px;display:flex;align-items:center;gap:5px">
+        <div style="width:18px;height:18px;border-radius:50%;background:#2C2C2A;color:#fff;font-size:7px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${initials}</div>
+        <span style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.solicitante.split(' ')[0]}</span>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center">
+        <div style="width:7px;height:7px;border-radius:50%;background:${pc.dot}"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function selectST(id) {
+  stSelectedId = id;
+  stEditMode   = false;
+  renderSTList();
+  renderSTDetail(id);
+}
+
+function renderSTDetail(id) {
+  const panel = document.getElementById('st-detail');
+  if (!id) { panel.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);gap:10px;padding:24px;text-align:center"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.25"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg><div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:600;opacity:.4">Selecciona una solicitud<br>para ver el detalle</div></div>`; return; }
+  const r = stRequests.find(x=>x.id===id);
+  if (!r) return;
+  const pc = ST_PRIO[r.prioridad]||ST_PRIO['Media'];
+  const ec = ST_ESTADO[r.estado]||ST_ESTADO['Pendiente'];
+  const overdue = r.deadline && new Date(r.deadline)<new Date() && r.estado!=='Resuelto' && r.estado!=='Cerrado';
+  const dl = r.deadline ? new Date(r.deadline).toLocaleDateString('es-PE',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+  const created = r.createdAt ? new Date(r.createdAt).toLocaleDateString('es-PE',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+
+  if (stEditMode) {
+    // Edit mode — inline form
+    const devOpts = DEVS.map(d=>`<option value="${esc(d)}"${d===r.solicitante?' selected':''}>${esc(d)}</option>`).join('');
+    panel.innerHTML = `
+      <div style="padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;background:var(--bg)">
+        <span style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:700;color:var(--purple);background:var(--purple-light);padding:2px 9px;border-radius:20px">${r.codigo}</span>
+        <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:700;color:var(--gray-900)">Editando</span>
+        <button onclick="stEditMode=false;renderSTDetail(${id})" style="margin-left:auto;background:none;border:none;font-size:11px;color:var(--muted);cursor:pointer">✕ Cancelar</button>
+      </div>
+      <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+        <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Solicitante (Dev)</label>
+          <select onchange="stRequests.find(x=>x.id===${id}).solicitante=this.value" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none">${devOpts}</select></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Tipo</label>
+            <select onchange="stRequests.find(x=>x.id===${id}).tipo=this.value" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none">
+              ${['Incidente','Consulta SQL','Error ETL','Dashboard BI','Automatización','Soporte General'].map(t=>`<option${t===r.tipo?' selected':''}>${t}</option>`).join('')}
+            </select></div>
+          <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Prioridad</label>
+            <select onchange="stRequests.find(x=>x.id===${id}).prioridad=this.value" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none">
+              ${['Alta','Media','Baja'].map(p=>`<option${p===r.prioridad?' selected':''}>${p}</option>`).join('')}
+            </select></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Estado</label>
+            <select onchange="stRequests.find(x=>x.id===${id}).estado=this.value" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none">
+              ${['Pendiente','En proceso','Resuelto','Cerrado'].map(s=>`<option${s===r.estado?' selected':''}>${s}</option>`).join('')}
+            </select></div>
+          <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Fecha límite</label>
+            <input type="datetime-local" value="${r.deadline||''}" onchange="stRequests.find(x=>x.id===${id}).deadline=this.value" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none"></div>
+        </div>
+        <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Descripción</label>
+          <textarea onchange="stRequests.find(x=>x.id===${id}).desc=this.value" rows="4" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none;resize:vertical;font-family:'DM Sans',sans-serif">${esc(r.desc)}</textarea></div>
+        <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Vincular a tarea del Tablero</label>
+          <select onchange="stRequests.find(x=>x.id===${id}).taskId=this.value?Number(this.value):null" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none">
+            <option value="">— Sin vincular —</option>
+            ${activities.map(a=>`<option value="${a.id}"${a.id===r.taskId?' selected':''}>[${esc(a.proyecto)}] ${esc(a.desc.slice(0,50))}</option>`).join('')}
+          </select></div>
+        <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Comentarios internos</label>
+          <textarea onchange="stRequests.find(x=>x.id===${id}).comments=this.value" rows="2" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none;resize:vertical;font-family:'DM Sans',sans-serif">${esc(r.comments||'')}</textarea></div>
+        <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid var(--border)">
+          <button onclick="deleteST(${id})" style="font-size:11px;padding:6px 12px;border-radius:7px;border:1px solid #EDD0D0;background:#FAEDED;color:#922020;cursor:pointer;font-family:'Outfit',sans-serif;font-weight:600">Eliminar</button>
+          <button onclick="commitSTEdit(${id})" style="font-size:12px;font-weight:700;padding:7px 18px;background:var(--purple);color:#fff;border:none;border-radius:7px;cursor:pointer;font-family:'Outfit',sans-serif">Guardar cambios</button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Read mode
+  const p = v => `<div style="font-size:12px;color:var(--gray-700);font-weight:500;line-height:1.5">${v}</div>`;
+  const lbl = t => `<div style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;margin-top:12px">${t}</div>`;
+  panel.innerHTML = `
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+      <div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+          <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:700;color:var(--purple);background:var(--purple-light);padding:2px 9px;border-radius:20px">${r.codigo}</span>
+          <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:${ec.bg};color:${ec.text}">${r.estado}</span>
+          <span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px;background:${pc.bg};color:${pc.text};display:inline-flex;align-items:center;gap:3px"><span style="width:5px;height:5px;border-radius:50%;background:${pc.dot};display:inline-block"></span>${r.prioridad}</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${ST_TIPO_ICON[r.tipo]||'📋'} ${r.tipo}</div>
+      </div>
+      <button onclick="stEditMode=true;renderSTDetail(${id})" style="flex-shrink:0;font-size:11px;font-weight:600;padding:5px 11px;border:1px solid var(--border);border-radius:7px;background:var(--card-bg);color:var(--gray-700);cursor:pointer;font-family:'Outfit',sans-serif;transition:all .15s" onmouseover="this.style.borderColor='var(--purple)';this.style.color='var(--purple)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--gray-700)'">Editar</button>
+    </div>
+    <div style="padding:0 16px 20px">
+      ${lbl('Solicitante')}
+      <div style="display:flex;align-items:center;gap:7px;margin-top:4px">
+        <div style="width:22px;height:22px;border-radius:50%;background:#534AB7;color:#fff;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">${r.solicitante.split(' ').map(w=>w[0]).join('').slice(0,2)}</div>
+        <div style="font-size:12px;color:var(--gray-700)">${esc(r.solicitante)} <span style="color:var(--muted);font-size:10px">· Dev</span></div>
+      </div>
+      ${lbl('Resuelto por')}
+      <div style="display:flex;align-items:center;gap:7px;margin-top:4px">
+        <div style="width:22px;height:22px;border-radius:50%;background:#2C2C2A;color:#fff;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">KH</div>
+        <div style="font-size:12px;color:var(--gray-700)">Kevin Huacahuasi <span style="color:var(--muted);font-size:10px">· Ing. Datos Senior</span></div>
+      </div>
+      ${lbl('Descripción')}
+      <div style="font-size:12px;color:var(--gray-700);line-height:1.6;margin-top:4px;white-space:pre-wrap">${esc(r.desc)}</div>
+      ${lbl('Fecha límite')}
+      ${p(`<span style="${overdue?'color:#922020;font-weight:600':''}">${overdue?'⚠ ':''} ${dl}</span>`)}
+      ${r.comments ? lbl('Comentarios internos') + `<div style="font-size:12px;color:var(--gray-700);line-height:1.6;margin-top:4px;background:var(--bg);border-radius:7px;padding:8px 10px;border:1px solid var(--border)">${esc(r.comments)}</div>` : ''}
+      ${(()=>{
+        if (!r.taskId) return '';
+        const t = activities.find(a=>a.id===r.taskId);
+        if (!t) return '';
+        return lbl('Tarea vinculada') + `<div style="display:flex;align-items:center;gap:7px;margin-top:4px;background:var(--purple-light);border:1px solid #D0CEEE;border-radius:7px;padding:7px 10px">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2" style="flex-shrink:0"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="10" rx="1"/></svg>
+          <div style="min-width:0">
+            <div style="font-size:10px;font-weight:700;color:var(--purple-dark);font-family:'Outfit',sans-serif">${esc(t.proyecto)}</div>
+            <div style="font-size:11px;color:var(--purple-dark);opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.desc)}</div>
+          </div>
+          <span style="font-size:9px;padding:2px 7px;border-radius:20px;background:var(--card-bg);color:var(--purple-dark);border:1px solid #D0CEEE;white-space:nowrap;flex-shrink:0">${t.estado}</span>
+        </div>`;
+      })()}
+      ${lbl('Registrado')}
+      ${p(created)}
+    </div>`;
+}
+
+function commitSTEdit(id) {
+  const r = stRequests.find(x=>x.id===id);
+  if (r) r.updatedAt = localISOString();
+  saveSTStorage();
+  stEditMode = false;
+  renderST();
+  showToast('Solicitud actualizada ✓');
+}
+
+function openSTForm() {
+  // Create new — directly in panel
+  stSelectedId = null;
+  stEditMode   = false;
+  const panel  = document.getElementById('st-detail');
+  const code   = nextSTCode();
+  const devOpts = DEVS.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  panel.innerHTML = `
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;gap:8px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/></svg>
+        <span style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:700;color:var(--purple-dark)">${code}</span>
+      </div>
+      <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:700;color:var(--gray-900)">Nueva solicitud técnica</span>
+    </div>
+    <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg);border-radius:7px;border:1px solid var(--border)">
+        <div style="width:22px;height:22px;border-radius:50%;background:#2C2C2A;color:#fff;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">KH</div>
+        <div><div style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:700;color:var(--gray-900)">Kevin Huacahuasi</div><div style="font-size:9px;color:var(--muted)">Responsable · Ing. Datos Senior</div></div>
+        <svg style="margin-left:auto;transform:rotate(180deg)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </div>
+      <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Solicitante (Dev) *</label>
+        <select id="nst-resp" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none">${devOpts}</select></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Tipo</label>
+          <select id="nst-tipo" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none">
+            ${['Incidente','Consulta SQL','Error ETL','Dashboard BI','Automatización','Soporte General'].map(t=>`<option>${t}</option>`).join('')}
+          </select></div>
+        <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Prioridad</label>
+          <select id="nst-prio" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none">
+            <option>Alta</option><option selected>Media</option><option>Baja</option>
+          </select></div>
+      </div>
+      <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Descripción detallada *</label>
+        <textarea id="nst-desc" rows="4" placeholder="Describe el incidente, consulta o requerimiento..." style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none;resize:vertical;font-family:'DM Sans',sans-serif"></textarea></div>
+      <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Fecha límite</label>
+        <input type="datetime-local" id="nst-deadline" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none"></div>
+      <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Vincular a tarea del Tablero (opcional)</label>
+        <select id="nst-task" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none">
+          <option value="">— Sin vincular —</option>
+          ${activities.filter(a=>a.estado!=='Completado'&&a.estado!=='Cerrado').map(a=>`<option value="${a.id}">[${esc(a.proyecto)}] ${esc(a.desc.slice(0,55))}${a.desc.length>55?'...':''}</option>`).join('')}
+        </select></div>
+      <div><label style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Comentarios internos</label>
+        <textarea id="nst-comments" rows="2" placeholder="Notas internas, contexto adicional..." style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;background:var(--bg);outline:none;resize:vertical;font-family:'DM Sans',sans-serif"></textarea></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:8px;border-top:1px solid var(--border)">
+        <button onclick="renderSTDetail(null)" style="font-size:11px;padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--gray-700);cursor:pointer;font-family:'Outfit',sans-serif">Cancelar</button>
+        <button onclick="saveNewST('${code}')" style="font-size:12px;font-weight:700;padding:7px 18px;background:var(--purple);color:#fff;border:none;border-radius:7px;cursor:pointer;font-family:'Outfit',sans-serif">Guardar solicitud</button>
+      </div>
+    </div>`;
+}
+
+function saveNewST(code) {
+  const resp    = document.getElementById('nst-resp')?.value;
+  const tipo    = document.getElementById('nst-tipo')?.value;
+  const prio    = document.getElementById('nst-prio')?.value;
+  const desc    = document.getElementById('nst-desc')?.value.trim();
+  const deadline= document.getElementById('nst-deadline')?.value;
+  const comments= document.getElementById('nst-comments')?.value.trim();
+  const taskId  = document.getElementById('nst-task')?.value || null;
+  if (!resp || !desc) { showToast('Completa los campos requeridos'); return; }
+  const r = { id:Date.now(), codigo:code, solicitante:resp, responsable:'Kevin Huacahuasi', tipo, prioridad:prio, desc, estado:'Pendiente', deadline, comments, taskId: taskId ? Number(taskId) : null, createdAt:localISOString(), updatedAt:localISOString() };
+  stRequests.push(r);
+  saveSTStorage();
+  stSelectedId = r.id;
+  renderST();
+  showToast('Solicitud registrada ✓');
+}
+
+function deleteST(id) {
+  if (!confirm('¿Eliminar esta solicitud?')) return;
+  stRequests = stRequests.filter(r=>r.id!==id);
+  saveSTStorage();
+  stSelectedId = null;
+  renderST();
+  showToast('Solicitud eliminada');
+}
+
+// Legacy stubs (not needed in new design but keep references safe)
+function openSTModal()   { openSTForm(); }
+function closeSTModal()  {}
+function saveST()        {}
+function moveSTStatus()  {}
+function stDragStart()   {}
+function stDrop()        {}
+
 function localISOString(){const d=new Date(),p=n=>String(n).padStart(2,'0');return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`}
 function localDateOf(d){const p=n=>String(n).padStart(2,'0');return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`}
 function localDateString(){const d=new Date(),p=n=>String(n).padStart(2,'0');return`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`}
@@ -3152,7 +3536,75 @@ const saved=sessionStorage.getItem('cu');
 if(saved){currentUser=JSON.parse(saved);document.getElementById('view-login').style.display='none';showApp();}
 </script>
 
-<!-- ══ RECURRING MODAL ══ -->
+<!-- ══ SOLICITUDES TÉCNICAS ══ -->
+<div id="view-st" style="display:none;flex-direction:column;height:calc(100vh - 58px);overflow:hidden">
+
+  <!-- Toolbar -->
+  <div style="background:var(--card-bg);border-bottom:1px solid var(--border);padding:9px 1.5rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0">
+    <select id="st-filter-dev" onchange="renderST()" style="font-family:'DM Sans',sans-serif;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:7px;background:var(--bg);outline:none;color:var(--text)">
+      <option value="all">👤 Todos los solicitantes</option>
+    </select>
+    <select id="st-filter-prio" onchange="renderST()" style="font-family:'DM Sans',sans-serif;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:7px;background:var(--bg);outline:none;color:var(--text)">
+      <option value="all">🎯 Todas las prioridades</option>
+      <option value="Alta">🔴 Alta</option>
+      <option value="Media">🟡 Media</option>
+      <option value="Baja">🟢 Baja</option>
+    </select>
+    <select id="st-filter-tipo" onchange="renderST()" style="font-family:'DM Sans',sans-serif;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:7px;background:var(--bg);outline:none;color:var(--text)">
+      <option value="all">📋 Todos los tipos</option>
+      <option value="Incidente">⚡ Incidente</option>
+      <option value="Consulta SQL">🗃 Consulta SQL</option>
+      <option value="Error ETL">🔄 Error ETL</option>
+      <option value="Dashboard BI">📊 Dashboard BI</option>
+      <option value="Automatización">🤖 Automatización</option>
+      <option value="Soporte General">🛠 Soporte General</option>
+    </select>
+    <select id="st-filter-estado" onchange="renderST()" style="font-family:'DM Sans',sans-serif;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:7px;background:var(--bg);outline:none;color:var(--text)">
+      <option value="all">📌 Todos los estados</option>
+      <option value="Pendiente">⏳ Pendiente</option>
+      <option value="En proceso">⚡ En proceso</option>
+      <option value="Resuelto">✅ Resuelto</option>
+      <option value="Cerrado">🔒 Cerrado</option>
+    </select>
+    <div style="position:relative;flex-shrink:0">
+      <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);width:12px;height:12px;stroke:var(--muted);fill:none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="st-search" oninput="renderST()" placeholder="Buscar..." style="font-family:'DM Sans',sans-serif;font-size:12px;padding:6px 12px 6px 28px;border:1px solid var(--border);border-radius:20px;background:var(--bg);outline:none;width:170px;color:var(--text)">
+    </div>
+    <button onclick="openSTForm()" id="btnNuevaST" style="margin-left:auto;display:flex;align-items:center;gap:6px;font-family:'Outfit',sans-serif;font-size:12px;font-weight:700;padding:7px 14px;background:var(--purple);color:#fff;border:none;border-radius:7px;cursor:pointer;transition:background .15s" onmouseover="this.style.background='var(--purple-dark)'" onmouseout="this.style.background='var(--purple)'">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Nueva solicitud
+    </button>
+  </div>
+
+  <!-- KPIs -->
+  <div id="st-kpis" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:12px 1.5rem;flex-shrink:0;border-bottom:1px solid var(--border);background:var(--bg)"></div>
+
+  <!-- Split panel -->
+  <div style="display:grid;grid-template-columns:1fr 360px;flex:1;min-height:0;overflow:hidden">
+
+    <!-- LEFT — ticket list -->
+    <div style="display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border)">
+      <!-- Table header -->
+      <div style="display:grid;grid-template-columns:72px 1fr 100px 90px 36px;gap:0;border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0">
+        <div style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:8px 12px">Código</div>
+        <div style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:8px 8px">Descripción</div>
+        <div style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:8px 8px">Estado</div>
+        <div style="font-family:'Outfit',sans-serif;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:8px 8px">Solicitante</div>
+        <div style="padding:8px 8px"></div>
+      </div>
+      <!-- Rows -->
+      <div id="st-list" style="overflow-y:auto;flex:1"></div>
+    </div>
+
+    <!-- RIGHT — detail panel -->
+    <div id="st-detail" style="overflow-y:auto;background:var(--card-bg)">
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);gap:10px;padding:24px;text-align:center">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.25"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+        <div style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:600;opacity:.4">Selecciona una solicitud<br>para ver el detalle</div>
+      </div>
+    </div>
+
+  </div>
+</div>
 <div class="overlay" id="recurringOverlay">
   <div class="modal" style="width:520px">
     <div class="modal-header">
